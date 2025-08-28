@@ -11,6 +11,7 @@ import org.apache.uima.util.XMLInputSource;
 import org.javatuples.Triplet;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.DUUIComposer;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.IDUUICommunicationLayer;
+import org.texttechnologylab.DockerUnifiedUIMAInterface.connection.IDUUIConnectionHandler;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.exception.CommunicationLayerException;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.exception.PipelineComponentException;
 import org.texttechnologylab.DockerUnifiedUIMAInterface.lua.DUUILuaContext;
@@ -28,6 +29,7 @@ import java.nio.file.Path;
 import java.security.InvalidParameterException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,7 +42,7 @@ import static java.lang.String.format;
  * This driver handles the special requirements of Ray components that need to collect
  * training data from multiple workers before starting a single training process.
  *
- * @author Generated for DUUI Framework
+ * @author Daniel Bundan
  */
 public class DUUIRayDriver implements IDUUIDriverInterface {
 
@@ -114,10 +116,17 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
     public void run(String uuid, JCas cas, DUUIPipelineDocumentPerformance perf, DUUIComposer composer)
             throws CASException, PipelineComponentException, CompressorException, IOException, InterruptedException, SAXException, CommunicationLayerException {
 
+
+        System.out.println("testteststetststetst");
+
         InstantiatedRayComponent component = _activeComponents.get(uuid);
         if (component == null) {
             throw new InvalidParameterException("Invalid UUID, this component has not been instantiated by the Ray Driver");
         }
+
+        submitTrainingData(component, cas);
+
+        receiveTrainingResults(component, cas);
 
         // Ray training workflow:
         // 1. Collect training data from this worker
@@ -135,11 +144,7 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
             throw new InvalidParameterException("Invalid UUID, this component has not been instantiated by the Ray Driver");
         }
 
-        try {
-            return getTypesystemFromRayComponent(component.getUrl());
-        } catch (InvalidXMLException e) {
-            throw new ResourceInitializationException(e);
-        }
+        return IDUUIInstantiatedPipelineComponent.getTypesystem(uuid, component);
     }
 
     @Override
@@ -188,15 +193,15 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
     /**
      * Collects training data from a worker and manages the training coordination
      */
-    private void submitTrainingData(InstantiatedRayComponent component, JCas cas, DUUIPipelineDocumentPerformance perf)
+    private void submitTrainingData(InstantiatedRayComponent component, JCas cas)
             throws CommunicationLayerException, CASException, IOException, InterruptedException {
 
         // Serialize CAS data for training
-        ByteArrayOutputStream trainingDataStream = new ByteArrayOutputStream();
-        component.getCommunicationLayer().serialize(cas, trainingDataStream, component.getParameters());
+        //ByteArrayOutputStream trainingDataStream = new ByteArrayOutputStream();  // Data as bytes
+        //component.getCommunicationLayer().serialize(cas, trainingDataStream, component.getParameters());
 
         // Submit this worker's data to the global training session
-        component.getTrainingSession().submitTrainingData(trainingDataStream.toByteArray());
+        component.getTrainingSession().submitTrainingData(cas);
     }
 
     /**
@@ -227,12 +232,24 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
      * Triggers the actual Ray training process
      */
     private void triggerRayTraining(GlobalTrainingSession trainingSession) throws IOException, InterruptedException {
+        System.out.println("Worker triggered training.");
+
         String rayUrl = trainingSession.getRayUrl();
+
+        StringBuilder s = new StringBuilder();
+
+        for(JCas cas : trainingSession.getAllTrainingData()){
+            if(s.toString().equals("")){
+                s.append(cas.getSofaDataString());
+            }else{
+                s.append("\n\n").append(cas.getSofaDataString());
+            }
+        }
 
         // Send start training signal to Ray component with all collected data
         HttpRequest trainingRequest = HttpRequest.newBuilder()
                 .uri(URI.create(rayUrl + "/v1/train"))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(trainingSession.getAllTrainingData()))
+                .POST(HttpRequest.BodyPublishers.ofString(s.toString()))
                 .build();
 
         HttpResponse<byte[]> response = _httpClient.send(trainingRequest, HttpResponse.BodyHandlers.ofByteArray());
@@ -280,28 +297,6 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
             return new DUUILuaCommunicationLayer(response.body(), "ray_component", _luaContext);
         } else {
             throw new IOException(format("Failed to get communication layer from Ray component at %s", rayUrl));
-        }
-    }
-
-    /**
-     * Gets typesystem from Ray component using UIMA's built-in XML parsing
-     */
-    private TypeSystemDescription getTypesystemFromRayComponent(String rayUrl)
-            throws IOException, InterruptedException, SAXException, InvalidXMLException {
-
-        HttpRequest typesystemRequest = HttpRequest.newBuilder()
-                .uri(URI.create(rayUrl + DUUIComposer.V1_COMPONENT_ENDPOINT_TYPESYSTEM))
-                .GET()
-                .build();
-
-        HttpResponse<String> response = _httpClient.send(typesystemRequest, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() == 200) {
-            // Parse XML typesystem using UIMA's XMLInputSource and TypeSystemDescriptionFactory
-            XMLInputSource xmlInput = new XMLInputSource(new ByteArrayInputStream(response.body().getBytes()), null);
-            return TypeSystemDescriptionFactory.createTypeSystemDescription(xmlInput);
-        } else {
-            throw new IOException(format("Failed to get typesystem from Ray component at %s", rayUrl));
         }
     }
 
@@ -366,15 +361,34 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
     /**
      * Ray-specific instantiated component that handles training data collection and coordination
      */
-    private static class InstantiatedRayComponent {
+    private static class InstantiatedRayComponent implements IDUUIInstantiatedPipelineComponent {
         private final DUUIPipelineComponent _component;
+        private final ConcurrentLinkedQueue<ComponentInstance> _components;
         private final GlobalTrainingSession _trainingSession;
         private IDUUICommunicationLayer _communicationLayer;
         private String _rayUrl;
 
-        public InstantiatedRayComponent(DUUIPipelineComponent component, GlobalTrainingSession trainingSession) {
-            _component = component;
+        private final int _scale;
+        private final boolean _websocket;
+        private final int _ws_elements;
+
+        private final Map<String, String> _parameters;
+        private String _sourceView;
+        private String _targetView;
+        private String sHost = "localhost";
+
+        public InstantiatedRayComponent(DUUIPipelineComponent comp, GlobalTrainingSession trainingSession) {
+            _component = comp;
+            _components = new ConcurrentLinkedQueue<>();
             _trainingSession = trainingSession;
+
+            _parameters = comp.getParameters();
+            _targetView = comp.getTargetView();
+            _sourceView = comp.getSourceView();
+            _scale = comp.getScale(1);
+
+            _websocket = comp.isWebsocket();
+            _ws_elements = comp.getWebsocketElements();
         }
 
         public void setCommunicationLayer(IDUUICommunicationLayer layer) {
@@ -393,8 +407,44 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
             return _rayUrl;
         }
 
+        @Override
+        public DUUIPipelineComponent getPipelineComponent() {
+            return _component;
+        }
+
+        @Override
+        public Triplet<IDUUIUrlAccessible, Long, Long> getComponent() {
+            long mutexStart = System.nanoTime();
+            ComponentInstance inst = _components.poll();
+            while (inst == null) {
+                inst = _components.poll();
+            }
+            long mutexEnd = System.nanoTime();
+            return Triplet.with(inst, mutexStart, mutexEnd);
+        }
+
+        @Override
+        public void addComponent(IDUUIUrlAccessible item) {
+            _components.add((ComponentInstance) item);
+        }
+
         public Map<String, String> getParameters() {
             return _component.getParameters();
+        }
+
+        @Override
+        public String getSourceView() {
+            return _sourceView;
+        }
+
+        @Override
+        public String getTargetView() {
+            return _targetView;
+        }
+
+        @Override
+        public String getUniqueComponentKey() {
+            return "";
         }
 
         public GlobalTrainingSession getTrainingSession() {
@@ -402,8 +452,37 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
         }
 
         public void cleanup() {
-            // Cleanup handled by the GlobalTrainingSession
             _trainingSession.cleanup();
+        }
+    }
+
+
+    private static class ComponentInstance implements IDUUIUrlAccessible {
+        String _host;
+        IDUUIConnectionHandler _handler;
+        IDUUICommunicationLayer _communication_layer;
+
+        public ComponentInstance(String url, IDUUICommunicationLayer layer) {
+            _host = url;
+            _communication_layer = layer;
+        }
+
+        public IDUUICommunicationLayer getCommunicationLayer() {
+            return _communication_layer;
+        }
+
+        public ComponentInstance(String url, IDUUICommunicationLayer layer, IDUUIConnectionHandler handler) {
+            _host = url;
+            _communication_layer = layer;
+            _handler = handler;
+        }
+
+        public String generateURL() {
+            return _host;
+        }
+
+        public IDUUIConnectionHandler getHandler() {
+            return _handler;
         }
     }
 
@@ -413,7 +492,7 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
      */
     private static class GlobalTrainingSession {
         private final String _rayUrl;
-        private final List<byte[]> _trainingDataBatches;
+        private final List<JCas> _trainingDataBatches;
         private final AtomicInteger _expectedWorkers;
         private final AtomicInteger _receivedBatches;
         private final CountDownLatch _trainingCompleteLatch;
@@ -434,7 +513,7 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
             _expectedWorkers.compareAndSet(1, workerCount);
         }
 
-        public void submitTrainingData(byte[] data) {
+        public void submitTrainingData(JCas data) {
             _trainingDataBatches.add(data);
             int received = _receivedBatches.incrementAndGet();
             System.out.printf("[RayDriver] Received training data batch %d/%d\n", received, _expectedWorkers.get());
@@ -446,16 +525,8 @@ public class DUUIRayDriver implements IDUUIDriverInterface {
                     _trainingTriggered.compareAndSet(false, true);
         }
 
-        public byte[] getAllTrainingData() {
-            // Combine all data batches into a single payload
-            try (ByteArrayOutputStream combined = new ByteArrayOutputStream()) {
-                for (byte[] batch : _trainingDataBatches) {
-                    combined.write(batch);
-                }
-                return combined.toByteArray();
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to combine training data batches", e);
-            }
+        public List<JCas> getAllTrainingData() {
+            return _trainingDataBatches;
         }
 
         public void setTrainingResults(byte[] results) {

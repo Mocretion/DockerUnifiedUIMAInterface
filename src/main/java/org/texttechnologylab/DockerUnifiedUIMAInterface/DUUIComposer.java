@@ -552,7 +552,11 @@ class DUUIWorkerDocumentReader extends Thread {
 
         DUUIDocument document;
 
+        int a = 0;
         while (!composer.shouldShutdown()) {
+            System.out.println("composer run iter: " + Integer.toString(a));
+            ++a;
+
             Timer timer = new Timer();
             timer.start();
 
