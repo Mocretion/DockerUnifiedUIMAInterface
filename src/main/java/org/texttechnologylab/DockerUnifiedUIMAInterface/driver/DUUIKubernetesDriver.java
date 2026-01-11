@@ -57,6 +57,11 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
 
     private IDUUIConnectionHandler _wsclient;
 
+    private int iScaleBuffer = 0;
+
+    private static int _port = 9715;
+    private static String sNamespace = "default";
+
     /**
      * Constructor.
      *
@@ -68,10 +73,24 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
 
         _interface = new DUUIDockerInterface();
 
-        _container_timeout = 10000;
+        _container_timeout = 1000;
         _client = HttpClient.newHttpClient();
 
         _active_components = new HashMap<>();
+    }
+
+    public DUUIKubernetesDriver withScaleBuffer(int iValue) {
+        this.iScaleBuffer = iValue;
+        return this;
+    }
+
+    public DUUIKubernetesDriver withScaleBuffer() {
+        this.iScaleBuffer = 1;
+        return this;
+    }
+
+    public int getScaleBuffer() {
+        return this.iScaleBuffer;
     }
 
     @Override
@@ -123,7 +142,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
                 .withName(name)
                 .withImage(image)
                 .addNewPort()
-                    .withContainerPort(10001)
+                    .withContainerPort(_port)
                 .endPort()
                 .endContainer()
                 .withNewAffinity()
@@ -142,7 +161,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
                 .endSpec()
                 .build();
 
-            deployment = k8s.apps().deployments().inNamespace("default").resource(deployment).create();
+            deployment = k8s.apps().deployments().inNamespace(sNamespace).resource(deployment).create();
         }
     }
 
@@ -154,7 +173,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
      */
     public static Service createService(String name) {
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
-            String namespace = Optional.ofNullable(client.getNamespace()).orElse("default");
+            String namespace = Optional.ofNullable(client.getNamespace()).orElse(sNamespace);
             Service service = new ServiceBuilder()
                 .withNewMetadata()
                 .withName(name)
@@ -164,7 +183,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
                 .addNewPort()
                 .withName("k-port")
                 .withProtocol("TCP")
-                    .withPort(10001)
+                    .withPort(_port)
                 .withTargetPort(new IntOrString(9714))
                 .endPort()
                 .withType("LoadBalancer")
@@ -258,7 +277,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
              * Add "a" in front of the name, because according to the kubernetes-rules the names must start
              * with alphabetical character (must not start with digit)
              */
-            createDeployment("a" + uuid, dockerImage, scale, comp.getLabels());  // Erstelle Deployment
+            createDeployment("a" + uuid, dockerImage, scale + getScaleBuffer(), comp.getLabels());  // Erstelle Deployment
             service = createService("a" + uuid);  // Erstelle service und gebe diesen zurück
         } catch (Exception e) {
             deleteDeployment("a" + uuid);
@@ -306,7 +325,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
     public static void deleteDeployment(String name) {
         try (KubernetesClient k8s = new KubernetesClientBuilder().build()) {
             // Argument namespace could be generalized.
-            k8s.apps().deployments().inNamespace("default")
+            k8s.apps().deployments().inNamespace(sNamespace)
                 .withName(name)
                 .delete();
         }
@@ -320,7 +339,7 @@ public class DUUIKubernetesDriver implements IDUUIDriverInterface {
     public static void deleteService(String name) {
         try (KubernetesClient client = new DefaultKubernetesClient()) {
             // Argument namespace could be generalized.
-            client.services().inNamespace("default").withName(name).delete();
+            client.services().inNamespace(sNamespace).withName(name).delete();
         }
     }
 
