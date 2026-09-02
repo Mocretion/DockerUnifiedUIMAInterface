@@ -94,7 +94,7 @@ After that DUUI can be integrated as a dependency:
 <dependency>
   <groupId>com.github.texttechnologylab</groupId>
   <artifactId>DockerUnifiedUIMAInterface</artifactId>
-    <version>1.5.4</version>
+    <version>1.5.7</version>
 </dependency>
 ```
 
