@@ -89,7 +89,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <typesystem.version>3.0.14</typesystem.version>
-        <utilities.version>653a6a0850</utilities.version>
+        <utilities.version>-8d1c6e4342-1</utilities.version>
         <uima.version>3.6.1</uima.version>
         <dkpro.core.version>2.4.0</dkpro.core.version>
         <podman.version>a3b54ecc45</podman.version>
