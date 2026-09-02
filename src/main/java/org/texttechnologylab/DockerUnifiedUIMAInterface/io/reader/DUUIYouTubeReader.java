@@ -19,8 +19,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -406,11 +404,18 @@ public class DUUIYouTubeReader implements DUUICollectionReader {
         HttpResponse response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
         JSONObject jsonObject = new JSONObject(response.body().toString());
-        JSONArray resultArray = jsonObject.getJSONArray("items");
 
-        if (resultArray.length() == 0) return null;
+        if (jsonObject.has("error")) {
+            System.err.println(jsonObject.toString(1));
+            return "";
+        } else {
 
-        return resultArray.getJSONObject(0).getJSONObject("id").getString("channelId");
+            JSONArray resultArray = jsonObject.getJSONArray("items");
+
+            if (resultArray.length() == 0) return null;
+
+            return resultArray.getJSONObject(0).getJSONObject("id").getString("channelId");
+        }
     }
 
     private JSONObject getChannelVideosByChannelId(String channelId, String pageToken) throws IOException, InterruptedException {

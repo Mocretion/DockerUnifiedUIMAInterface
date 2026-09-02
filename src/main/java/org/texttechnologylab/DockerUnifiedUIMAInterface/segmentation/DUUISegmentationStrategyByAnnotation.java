@@ -1,6 +1,7 @@
 package org.texttechnologylab.DockerUnifiedUIMAInterface.segmentation;
 
 import org.apache.uima.UIMAException;
+import org.apache.uima.cas.CASException;
 import org.apache.uima.cas.Type;
 import org.apache.uima.fit.factory.JCasFactory;
 import org.apache.uima.fit.util.JCasUtil;
@@ -61,6 +62,8 @@ public class DUUISegmentationStrategyByAnnotation extends DUUISegmentationStrate
     private long annotationCount = 0;
     private JCas jCasCurrentSegment;
 
+    protected String sView = "_InitalView";
+
     public DUUISegmentationStrategyByAnnotation withStrictSegmentationClass(boolean strict) {
         this.strictSegmentationClass = strict;
         return this;
@@ -75,6 +78,15 @@ public class DUUISegmentationStrategyByAnnotation extends DUUISegmentationStrate
         return this;
     }
 
+
+    /**
+     * @param sView
+     * @return
+     */
+    public DUUISegmentationStrategyByAnnotation withView(String sView) {
+        this.sView = sView;
+        return this;
+    }
 
     /**
      * @param maxAnnotationsPerSegment
@@ -158,7 +170,7 @@ public class DUUISegmentationStrategyByAnnotation extends DUUISegmentationStrate
         // Prepare output cas by copying the full input cas as base
         jCasOutput = JCasFactory.createJCas(typeSystemDescription);
 
-        CasCopier.copyCas(jCasInput.getCas(), jCasOutput.getCas(), true, true);
+        CasCopier.copyCas(jCasInput.getView(sView).getCas(), jCasOutput.getCas(), true, true);
 
         // copy metadata explicitly
         // TODO why is this needed? what other types need to be copied manually?
@@ -216,10 +228,10 @@ public class DUUISegmentationStrategyByAnnotation extends DUUISegmentationStrate
      * @param segmentBegin The begin position of the segment
      * @param segmentEnd   The end position of the segment
      */
-    void createSegment(int segmentBegin, int segmentEnd) {
+    void createSegment(int segmentBegin, int segmentEnd) throws CASException {
         // Note we do not handle errors here as this should normally not fail as annotations should not exceed the
         // document length, if it does, there might be something wrong and we fail early
-        String documentText = jCasInput.getDocumentText().substring(segmentBegin, segmentEnd);
+        String documentText = jCasInput.getView(sView).getDocumentText().substring(segmentBegin, segmentEnd);
 
         // Reset next cas, faster than creating a new one
         jCasCurrentSegment.reset();
@@ -290,7 +302,7 @@ public class DUUISegmentationStrategyByAnnotation extends DUUISegmentationStrate
     }
 
     @Override
-    public JCas getNextSegment() {
+    public JCas getNextSegment() throws CASException {
         // The max amount should not change as we rely on list created at initialization
         // However, as we take also all annotations withut positions, the data can still grow much larger,
         // thus we do not write directly in the provided input cas but rely on a separate output cas

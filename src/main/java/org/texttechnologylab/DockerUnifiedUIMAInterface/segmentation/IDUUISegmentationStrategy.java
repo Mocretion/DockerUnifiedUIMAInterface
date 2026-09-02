@@ -1,6 +1,7 @@
 package org.texttechnologylab.DockerUnifiedUIMAInterface.segmentation;
 
 import org.apache.uima.UIMAException;
+import org.apache.uima.cas.CASException;
 import org.apache.uima.jcas.JCas;
 
 import java.io.Serializable;
@@ -13,7 +14,7 @@ public interface IDUUISegmentationStrategy extends Serializable {
     void finalize(JCas jCas);
 
     // Get next segment of the JCas
-    JCas getNextSegment();
+    JCas getNextSegment() throws CASException;
 
     // Merge the segmented JCas back into the output JCas
     void merge(JCas jCasSegment);

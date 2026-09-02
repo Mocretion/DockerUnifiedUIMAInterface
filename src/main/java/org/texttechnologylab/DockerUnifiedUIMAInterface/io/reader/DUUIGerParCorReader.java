@@ -32,8 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class DUUIGerParCorReader implements DUUICollectionReader {
 
-
     private AdvancedProgressMeter progress;
+
     private final ConcurrentLinkedQueue<Document> loadedItems = new ConcurrentLinkedQueue();
     private final ConcurrentLinkedQueue<Document> items = new ConcurrentLinkedQueue();
 

@@ -2,6 +2,7 @@ package org.texttechnologylab.DockerUnifiedUIMAInterface.segmentation;
 
 import de.tudarmstadt.ukp.dkpro.core.api.metadata.type.DocumentMetaData;
 import org.apache.uima.UIMAException;
+import org.apache.uima.cas.CASException;
 import org.apache.uima.fit.util.JCasUtil;
 import org.apache.uima.jcas.JCas;
 import org.apache.uima.util.CasCopier;
@@ -98,7 +99,7 @@ public abstract class DUUISegmentationStrategy implements IDUUISegmentationStrat
      *
      * @return
      */
-    public abstract JCas getNextSegment();
+    public abstract JCas getNextSegment() throws CASException;
 
     /**
      * Initialize the state of the segmentation strategy, this is called automatically when a new JCas is set
